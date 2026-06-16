@@ -202,74 +202,199 @@ def analyze_violations(
     uploaded_text: str,
     reference_chunks: list[dict],
     uploaded_name: str,
-) -> str:
-    ref_context = "\n\n---\n\n".join(
-        f"[Source: {c['source']}]\n{c['text']}" for c in reference_chunks
-    )
+) -> dict:
+    """
+    Analyze uploaded document against reference standards using RAG + LLM.
+    Returns structured findings with confidence scores and evidence.
+    """
+    # Build context with source metadata for better traceability
+    ref_context_parts = []
+    for c in reference_chunks:
+        source_info = c.get('source', 'unknown')
+        chunk_idx = c.get('chunk_index', 0)
+        ref_context_parts.append(
+            f"[Source Document: {source_info}] [Chunk ID: {c['id']}]\n{c['text']}"
+        )
+    ref_context = "\n\n=== REFERENCE CHUNK SEPARATOR ===\n\n".join(ref_context_parts)
 
     system = (
-        "You are a strict compliance auditor. "
-        "Compare the uploaded document against the reference standard documents "
-        "and identify ALL violations, discrepancies, missing items, and non-compliances. "
-        "Be specific, cite exact text, and categorise by severity. "
-        "Respond entirely in clean Markdown."
+        "You are a strict AI compliance auditor specializing in financial and insurance document validation. "
+        "Your task is to compare uploaded documents against reference compliance standards and produce an auditable report. "
+        "For EACH violation found, you MUST provide: "
+        "(1) A confidence score (0.0-1.0) indicating how certain you are about the violation, "
+        "(2) Direct evidence quotes from both the uploaded document AND reference standard, "
+        "(3) Clear explanation of WHY it's a violation. "
+        "Be precise, cite exact text, and justify every finding. "
+        "Respond ONLY in valid JSON format matching the schema provided."
     )
 
-    prompt = f"""# DOCUMENT AUDIT TASK
+    prompt = f"""# FINANCIAL/INSURANCE DOCUMENT COMPLIANCE AUDIT
 
-## UPLOADED DOCUMENT: "{uploaded_name}"
-{uploaded_text[:5000]}
+## TASK OVERVIEW
+You are performing an AI-driven audit to validate compliance of a submitted document against official reference standards.
+This is for a hackathon project requiring: RAG-based retrieval, rule validation, explainability, and confidence scoring.
 
----
+## UPLOADED DOCUMENT FOR REVIEW: "{uploaded_name}"
+```
+{uploaded_text[:6000]}
+```
 
-## REFERENCE STANDARD (retrieved from vector database):
-{ref_context[:4500]}
+## REFERENCE COMPLIANCE STANDARDS (Retrieved via RAG from Vector Database)
+{ref_context[:5000]}
 
----
+## OUTPUT REQUIREMENTS
 
-## YOUR ANALYSIS TASK
+Produce a JSON object with the following exact structure:
 
-Compare the uploaded document against the reference standard. Produce the report below.
+```json
+{{
+  "executive_summary": {{
+    "document_name": "{uploaded_name}",
+    "audit_timestamp": "YYYY-MM-DD HH:MM:SS",
+    "total_violations_found": <integer>,
+    "severity_breakdown": {{
+      "critical": <count>,
+      "high": <count>,
+      "medium": <count>,
+      "low": <count>
+    }},
+    "overall_compliance_score": <float 0-100>,
+    "risk_level": "CRITICAL|HIGH|MEDIUM|LOW"
+  }},
+  "violations": [
+    {{
+      "violation_id": "V-001",
+      "title": "Short descriptive title",
+      "severity": "Critical|High|Medium|Low",
+      "violation_type": "Data Mismatch|Missing Clause|Contradictory Statement|Policy Violation|Format Error|Regulatory Non-Compliance|Other",
+      "confidence_score": <float 0.0-1.0>,
+      "location_in_uploaded_doc": {{
+        "page_number": <integer or null>,
+        "section": "section name if available",
+        "exact_quote": "direct quote from uploaded document"
+      }},
+      "reference_requirement": {{
+        "source_document": "name of reference doc",
+        "chunk_id": "chunk identifier",
+        "exact_quote": "direct quote from reference standard"
+      }},
+      "evidence_analysis": "Explain step-by-step reasoning: what the rule requires, what the document says, why this constitutes a violation",
+      "recommendation": "Specific actionable steps to remediate this violation",
+      "regulatory_impact": "Brief note on potential regulatory/financial impact"
+    }}
+  ],
+  "compliant_sections": [
+    {{
+      "section_name": "name of compliant section",
+      "description": "What this section covers",
+      "confidence_score": <float 0.0-1.0>,
+      "evidence": "Quote showing compliance"
+    }}
+  ],
+  "risk_assessment": {{
+    "overall_risk_score": <float 0-100, higher=worse>,
+    "top_3_priority_actions": [
+      "First priority action item",
+      "Second priority action item", 
+      "Third priority action item"
+    ],
+    "estimated_remediation_effort": "Low|Medium|High",
+    "potential_penalties": "Description of potential fines/consequences"
+  }},
+  "audit_methodology": {{
+    "rag_retrieval_method": "Semantic search over vectorized reference documents",
+    "model_used": "Qwen3 via vLLM",
+    "chunks_analyzed": {len(reference_chunks)},
+    "explainability_note": "Each violation includes direct evidence quotes and reasoning chain"
+  }},
+  "conclusion": "2-3 sentence final audit verdict summarizing overall compliance posture"
+}}
+```
 
-### 1. EXECUTIVE SUMMARY
-- One-paragraph overview of what was compared
-- Total violation count
-- Severity breakdown — Critical | High | Medium | Low
+## CRITICAL INSTRUCTIONS
 
-### 2. VIOLATION TABLE
-| # | Severity | Type | Location in Uploaded Doc | Reference Standard Says | Issue |
-|---|----------|------|--------------------------|-------------------------|-------|
-(one row per violation)
+1. **Confidence Scoring**: Assign confidence based on:
+   - 0.9-1.0: Clear violation with explicit contradictory evidence
+   - 0.7-0.9: Strong indication with good evidence
+   - 0.5-0.7: Moderate evidence, some ambiguity
+   - Below 0.5: Weak evidence, flag for human review
 
-### 3. DETAILED VIOLATION FINDINGS
-For every violation (V-001, V-002, …):
+2. **Evidence Requirements**: Every violation MUST include:
+   - Exact quote from uploaded document (or state "NOT FOUND" if missing required content)
+   - Exact quote from reference standard showing the requirement
+   - Clear logical connection between the two
 
-**V-XXX — [Short Title]**
-- **Severity:** Critical / High / Medium / Low
-- **Type:** Data Mismatch / Missing Clause / Contradictory Statement / Policy Violation / Format Error / Other
-- **Found in Uploaded Doc:** "[exact quote or NOT FOUND]"
-- **Reference Standard Requires:** "[exact quote]"
-- **Analysis:** Explain clearly what is wrong
-- **Recommendation:** How to fix it
+3. **Severity Classification**:
+   - Critical: Legal/regulatory breach, potential criminal liability
+   - High: Significant policy violation, major financial impact
+   - Medium: Notable deviation from standards, moderate impact
+   - Low: Minor formatting/procedural issues
 
-### 4. COMPLIANT SECTIONS
-List what IS correct and matches the reference standard.
+4. **Output Format**: Return ONLY valid JSON. No markdown fences. No explanatory text outside JSON."""
 
-### 5. RISK ASSESSMENT
-Overall compliance score (0–100 %), risk level, and top-3 priority actions.
-
-### 6. CONCLUSION
-Final audit verdict in 2–3 sentences."""
-
-    return call_vllm(prompt, system)
+    response_text = call_vllm(prompt, system)
+    
+    # Parse JSON response
+    import json
+    try:
+        # Try to extract JSON from response (handle potential markdown wrapping)
+        json_match = re.search(r'\{[\s\S]*\}', response_text)
+        if json_match:
+            result = json.loads(json_match.group())
+        else:
+            result = json.loads(response_text)
+        return result
+    except json.JSONDecodeError as e:
+        # Fallback: return structured error with raw response
+        return {
+            "error": f"Failed to parse LLM response as JSON: {str(e)}",
+            "raw_response": response_text,
+            "executive_summary": {
+                "document_name": uploaded_name,
+                "audit_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "total_violations_found": 0,
+                "severity_breakdown": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+                "overall_compliance_score": 50.0,
+                "risk_level": "UNKNOWN"
+            },
+            "violations": [],
+            "compliant_sections": [],
+            "risk_assessment": {
+                "overall_risk_score": 50.0,
+                "top_3_priority_actions": ["Review parsing error", "Check document quality", "Retry analysis"],
+                "estimated_remediation_effort": "Unknown",
+                "potential_penalties": "Unknown due to parsing error"
+            },
+            "audit_methodology": {
+                "rag_retrieval_method": "Semantic search over vectorized reference documents",
+                "model_used": MODEL_NAME,
+                "chunks_analyzed": len(reference_chunks),
+                "explainability_note": "JSON parsing failed - see raw_response"
+            },
+            "conclusion": "Analysis encountered a technical error. Please retry or check document quality."
+        }
 
 # ── PDF REPORT BUILDER ─────────────────────────────────────────────────────────
 def generate_pdf_report(
-    analysis_text: str,
+    analysis_data: dict,
     uploaded_name: str,
     reference_docs: list[str],
     report_id: str,
 ) -> str:
+    """
+    Generate a professional PDF audit report from structured JSON analysis data.
+    Includes executive summary, violations with confidence scores, evidence tables, and risk assessment.
+    """
+    import json
+    # Handle both dict and string inputs for backward compatibility
+    if isinstance(analysis_data, str):
+        try:
+            analysis = json.loads(analysis_data)
+        except:
+            analysis = {"raw_markdown": analysis_data}
+    else:
+        analysis = analysis_data
+    
     report_path = REPORT_DIR / f"violation_report_{report_id}.pdf"
     doc = SimpleDocTemplate(
         str(report_path), pagesize=A4,
@@ -292,6 +417,7 @@ def generate_pdf_report(
     sty_footer   = T("FT", fontSize=8, textColor=colors.grey, alignment=TA_CENTER)
     sty_bullet   = T("BL", fontSize=9.5, leading=14,
                      textColor=colors.HexColor("#333"), leftIndent=14)
+    sty_confidence = T("CF", fontSize=9, textColor=colors.HexColor("#6c63ff"), fontName="Helvetica-Bold")
 
     SEV = {
         "critical": "#c0392b", "high": "#e67e22",
@@ -302,34 +428,44 @@ def generate_pdf_report(
 
     # Header
     story.append(Spacer(1, .4*cm))
-    story.append(Paragraph("PDF VIOLATION AUDIT REPORT", sty_title))
+    story.append(Paragraph("🔍 AI-DRIVEN COMPLIANCE AUDIT REPORT", sty_title))
     story.append(Paragraph(
         f"Generated {datetime.now().strftime('%B %d, %Y  %H:%M:%S')}", sty_sub))
     story.append(HRFlowable(width="100%", thickness=2,
                              color=colors.HexColor("#1a1a2e")))
     story.append(Spacer(1, .3*cm))
 
-    # Meta table
+    # Extract key metrics from analysis
+    exec_summary = analysis.get("executive_summary", {})
+    total_violations = exec_summary.get("total_violations_found", 0)
+    compliance_score = exec_summary.get("overall_compliance_score", 0)
+    risk_level = exec_summary.get("risk_level", "UNKNOWN")
+    
+    # Meta table with key metrics
+    severity_breakdown = exec_summary.get("severity_breakdown", {})
     meta = [
         ["Report ID", report_id],
-        ["Uploaded Document", uploaded_name],
-        ["Reference Documents", "\n".join(reference_docs) or "None"],
-        ["AI Model", MODEL_NAME],
-        ["Vector DB", f"ChromaDB · {collection.count()} chunks indexed"],
+        ["Document Audited", uploaded_name[:40] + "..." if len(uploaded_name) > 40 else uploaded_name],
+        ["Compliance Score", f"{compliance_score:.1f}%"],
+        ["Risk Level", risk_level],
+        ["Total Violations", str(total_violations)],
+        ["Severity Breakdown", f"C:{severity_breakdown.get('critical',0)} H:{severity_breakdown.get('high',0)} M:{severity_breakdown.get('medium',0)} L:{severity_breakdown.get('low',0)}"],
+        ["Reference Docs", ", ".join(reference_docs[:2]) + ("..." if len(reference_docs) > 2 else "")],
+        ["AI Model", MODEL_NAME.split("/")[-1]],
     ]
-    mt = Table(meta, colWidths=[4*cm, 12*cm])
+    mt = Table(meta, colWidths=[4.5*cm, 11.5*cm])
     mt.setStyle(TableStyle([
         ("BACKGROUND",    (0,0), (0,-1), colors.HexColor("#1a1a2e")),
         ("TEXTCOLOR",     (0,0), (0,-1), colors.white),
         ("FONTNAME",      (0,0), (0,-1), "Helvetica-Bold"),
-        ("FONTSIZE",      (0,0), (-1,-1), 9),
+        ("FONTSIZE",      (0,0), (-1,-1), 8),
         ("GRID",          (0,0), (-1,-1), .5, colors.HexColor("#ccc")),
         ("ROWBACKGROUNDS",(1,0), (-1,-1),
          [colors.HexColor("#f9f9f9"), colors.white]),
-        ("VALIGN",        (0,0), (-1,-1), "TOP"),
-        ("TOPPADDING",    (0,0), (-1,-1), 5),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-        ("LEFTPADDING",   (0,0), (-1,-1), 8),
+        ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+        ("TOPPADDING",    (0,0), (-1,-1), 4),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ("LEFTPADDING",   (0,0), (-1,-1), 6),
     ]))
     story.append(mt)
     story.append(Spacer(1, .5*cm))
@@ -337,87 +473,183 @@ def generate_pdf_report(
                              color=colors.HexColor("#ccc")))
     story.append(Spacer(1, .3*cm))
 
-    # Parse markdown → ReportLab
-    def inline(t: str) -> str:
-        t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
-        t = re.sub(r"\*(.+?)\*",     r"<i>\1</i>", t)
-        t = re.sub(r"`(.+?)`",
-                   r'<font name="Courier" size="8">\1</font>', t)
-        for sev, col in SEV.items():
-            t = re.sub(
-                rf"\b({sev.capitalize()}|{sev.upper()})\b",
-                f'<font color="{col}"><b>\\1</b></font>',
-                t, flags=re.IGNORECASE,
-            )
-        return t
-
-    lines = analysis_text.split("\n")
-    i = 0
-    while i < len(lines):
-        raw  = lines[i]
-        line = raw.strip()
-
-        # Markdown table
-        if "|" in line and i+1 < len(lines) and "---" in lines[i+1]:
-            rows = [line]
-            i += 2
-            while i < len(lines) and "|" in lines[i]:
-                rows.append(lines[i])
-                i += 1
-            parsed = [
-                [c.strip() for c in r.strip("|").split("|")]
-                for r in rows
-            ]
-            if parsed:
-                nc  = max(len(r) for r in parsed)
-                pad = lambda r: r + [""] * (nc - len(r))
-                parsed = [pad(r) for r in parsed]
-                cw  = [16*cm / nc] * nc
-                tbl = Table(parsed, colWidths=cw, repeatRows=1)
-                tbl.setStyle(TableStyle([
-                    ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#1a1a2e")),
-                    ("TEXTCOLOR",     (0,0), (-1,0), colors.white),
-                    ("FONTNAME",      (0,0), (-1,0), "Helvetica-Bold"),
-                    ("FONTSIZE",      (0,0), (-1,-1), 8),
-                    ("GRID",          (0,0), (-1,-1), .5, colors.HexColor("#ccc")),
-                    ("ROWBACKGROUNDS",(0,1), (-1,-1),
-                     [colors.white, colors.HexColor("#f5f5f5")]),
-                    ("VALIGN",        (0,0), (-1,-1), "TOP"),
-                    ("TOPPADDING",    (0,0), (-1,-1), 4),
-                    ("BOTTOMPADDING", (0,0), (-1,-1), 4),
-                    ("LEFTPADDING",   (0,0), (-1,-1), 4),
-                    ("WORDWRAP",      (0,0), (-1,-1), True),
-                ]))
-                story.append(tbl)
-                story.append(Spacer(1, .3*cm))
-            continue
-
-        if not line:
-            story.append(Spacer(1, .12*cm))
-        elif line.startswith("### "):
-            story.append(Paragraph(inline(line[4:]), sty_h2))
-        elif line.startswith("## ") or line.startswith("# "):
-            story.append(Paragraph(inline(line.lstrip("# ")), sty_h1))
-        elif line.startswith("---"):
-            story.append(HRFlowable(width="100%", thickness=.5,
-                                     color=colors.HexColor("#ddd")))
-        elif line.startswith(("- ", "* ")):
-            story.append(Paragraph("• " + inline(line[2:]), sty_bullet))
-        else:
-            try:
-                story.append(Paragraph(inline(line), sty_body))
-            except Exception:
-                story.append(Paragraph(
-                    line.encode("ascii", "replace").decode(), sty_body))
-        i += 1
+    # Build structured sections from JSON analysis data
+    # Section 1: Executive Summary
+    story.append(Paragraph("EXECUTIVE SUMMARY", sty_h1))
+    
+    audit_ts = exec_summary.get("audit_timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    story.append(Paragraph(f"<b>Audit Timestamp:</b> {audit_ts}", sty_body))
+    
+    risk_color = {"CRITICAL": "#c0392b", "HIGH": "#e67e22", "MEDIUM": "#f39c12", "LOW": "#27ae60"}.get(risk_level, "#555")
+    story.append(Paragraph(f"<b>Risk Level:</b> <font color='{risk_color}'><b>{risk_level}</b></font>", sty_body))
+    story.append(Paragraph(f"<b>Overall Compliance Score:</b> <font color='#6c63ff'><b>{compliance_score:.1f}%</b></font>", sty_body))
+    story.append(Spacer(1, .2*cm))
+    
+    # Severity breakdown as a small table
+    sev_data = [["Critical", str(severity_breakdown.get("critical", 0))],
+                ["High", str(severity_breakdown.get("high", 0))],
+                ["Medium", str(severity_breakdown.get("medium", 0))],
+                ["Low", str(severity_breakdown.get("low", 0))]]
+    sev_tbl = Table(sev_data, colWidths=[3*cm, 2*cm])
+    sev_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#f0f0f0")),
+        ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+        ("ALIGN", (1,0), (1,-1), "CENTER"),
+    ]))
+    story.append(sev_tbl)
+    story.append(Spacer(1, .4*cm))
+    
+    # Section 2: Violations Table with Confidence Scores
+    violations = analysis.get("violations", [])
+    if violations:
+        story.append(Paragraph("DETAILED VIOLATION FINDINGS", sty_h1))
+        
+        # Create violations table with confidence scores
+        viol_table_data = [["ID", "Severity", "Confidence", "Type", "Issue Summary"]]
+        for v in violations:
+            conf = v.get("confidence_score", 0)
+            conf_display = f"{conf:.2f}"
+            conf_color = "#27ae60" if conf >= 0.8 else ("#f39c12" if conf >= 0.6 else "#e67e22")
+            viol_table_data.append([
+                v.get("violation_id", "N/A"),
+                v.get("severity", "Unknown"),
+                f"<font color='{conf_color}'><b>{conf_display}</b></font>",
+                v.get("violation_type", "Other")[:25],
+                v.get("title", "No title")[:30]
+            ])
+        
+        viol_tbl = Table(viol_table_data, colWidths=[1.5*cm, 2*cm, 2*cm, 3*cm, 7.5*cm], repeatRows=1)
+        viol_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1a1a2e")),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE", (0,0), (-1,-1), 8),
+            ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#ccc")),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f9f9f9")]),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("TOPPADDING", (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ("LEFTPADDING", (0,0), (-1,-1), 4),
+            ("WORDWRAP", (0,0), (-1,-1), True),
+        ]))
+        story.append(viol_tbl)
+        story.append(Spacer(1, .5*cm))
+        
+        # Detailed findings for each violation
+        story.append(Paragraph("EVIDENCE & ANALYSIS", sty_h1))
+        for v in violations:
+            story.append(Paragraph(f"<b>{v.get('violation_id', 'N/A')} — {v.get('title', 'Untitled')}</b>", sty_h2))
+            
+            # Confidence score badge
+            conf = v.get("confidence_score", 0)
+            conf_text = f"Confidence: {conf:.1%}"
+            story.append(Paragraph(f"<font color='#6c63ff'><b>{conf_text}</b></font>", sty_confidence))
+            
+            # Severity
+            sev = v.get("severity", "Unknown").lower()
+            sev_color = SEV.get(sev, "#555")
+            story.append(Paragraph(f"<b>Severity:</b> <font color='{sev_color}'><b>{v.get('severity', 'Unknown')}</b></font>", sty_body))
+            
+            # Type
+            story.append(Paragraph(f"<b>Type:</b> {v.get('violation_type', 'Other')}", sty_body))
+            
+            # Evidence from uploaded doc
+            loc = v.get("location_in_uploaded_doc", {})
+            quote = loc.get("exact_quote", "NOT FOUND")
+            if len(quote) > 200:
+                quote = quote[:200] + "..."
+            story.append(Paragraph(f"<b>Found in Document:</b> <i>{quote}</i>", sty_bullet))
+            
+            # Evidence from reference
+            ref = v.get("reference_requirement", {})
+            ref_quote = ref.get("exact_quote", "NOT AVAILABLE")
+            if len(ref_quote) > 200:
+                ref_quote = ref_quote[:200] + "..."
+            story.append(Paragraph(f"<b>Reference Requires:</b> <i>{ref_quote}</i>", sty_bullet))
+            
+            # Analysis/explanation
+            analysis_text = v.get("evidence_analysis", "No analysis provided")
+            story.append(Paragraph(f"<b>Analysis:</b>", sty_body))
+            for para in analysis_text.split("\n\n"):
+                if para.strip():
+                    try:
+                        story.append(Paragraph(inline(para.strip()), sty_body))
+                    except:
+                        story.append(Paragraph(para.strip(), sty_body))
+            
+            # Recommendation
+            rec = v.get("recommendation", "No recommendation")
+            story.append(Paragraph(f"<b>Recommendation:</b> {rec}", sty_bullet))
+            
+            # Regulatory impact
+            impact = v.get("regulatory_impact", "")
+            if impact:
+                story.append(Paragraph(f"<b>Regulatory Impact:</b> {impact}", sty_bullet))
+            
+            story.append(Spacer(1, .3*cm))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#ddd")))
+            story.append(Spacer(1, .2*cm))
+    
+    # Section 3: Compliant Sections
+    compliant = analysis.get("compliant_sections", [])
+    if compliant:
+        story.append(Paragraph("COMPLIANT SECTIONS", sty_h1))
+        for c in compliant:
+            conf = c.get("confidence_score", 0)
+            story.append(Paragraph(f"• <b>{c.get('section_name', 'Unnamed')}</b> (Confidence: {conf:.1%})", sty_bullet))
+            desc = c.get("description", "")
+            if desc:
+                story.append(Paragraph(f"  {desc}", sty_body))
+        story.append(Spacer(1, .3*cm))
+    
+    # Section 4: Risk Assessment
+    risk_assess = analysis.get("risk_assessment", {})
+    story.append(Paragraph("RISK ASSESSMENT", sty_h1))
+    overall_risk = risk_assess.get("overall_risk_score", 0)
+    story.append(Paragraph(f"<b>Overall Risk Score:</b> {overall_risk:.1f}/100 (higher = worse)", sty_body))
+    
+    priority_actions = risk_assess.get("top_3_priority_actions", [])
+    if priority_actions:
+        story.append(Paragraph("<b>Top Priority Actions:</b>", sty_body))
+        for i, action in enumerate(priority_actions, 1):
+            story.append(Paragraph(f"{i}. {action}", sty_bullet))
+    
+    effort = risk_assess.get("estimated_remediation_effort", "Unknown")
+    story.append(Paragraph(f"<b>Estimated Remediation Effort:</b> {effort}", sty_body))
+    
+    penalties = risk_assess.get("potential_penalties", "")
+    if penalties:
+        story.append(Paragraph(f"<b>Potential Penalties:</b> {penalties}", sty_body))
+    story.append(Spacer(1, .3*cm))
+    
+    # Section 5: Audit Methodology (Explainability)
+    methodology = analysis.get("audit_methodology", {})
+    story.append(Paragraph("AUDIT METHODOLOGY & EXPLAINABILITY", sty_h1))
+    story.append(Paragraph(f"<b>RAG Retrieval Method:</b> {methodology.get('rag_retrieval_method', 'Semantic search over vectorized documents')}", sty_body))
+    story.append(Paragraph(f"<b>AI Model Used:</b> {methodology.get('model_used', MODEL_NAME)}", sty_body))
+    chunks_analyzed = methodology.get("chunks_analyzed", 0)
+    story.append(Paragraph(f"<b>Reference Chunks Analyzed:</b> {chunks_analyzed}", sty_body))
+    explain_note = methodology.get("explainability_note", "")
+    if explain_note:
+        story.append(Paragraph(f"<b>Explainability:</b> {explain_note}", sty_bullet))
+    story.append(Spacer(1, .3*cm))
+    
+    # Section 6: Conclusion
+    conclusion = analysis.get("conclusion", "No conclusion provided.")
+    story.append(Paragraph("AUDIT CONCLUSION", sty_h1))
+    try:
+        story.append(Paragraph(inline(conclusion), sty_body))
+    except:
+        story.append(Paragraph(conclusion, sty_body))
 
     # Footer
     story.append(Spacer(1, 1*cm))
     story.append(HRFlowable(width="100%", thickness=1,
                              color=colors.HexColor("#1a1a2e")))
     story.append(Paragraph(
-        f"PDF Violation Agent  ·  Report {report_id}  ·  "
-        f"{datetime.now().strftime('%Y-%m-%d')}  ·  Model: {MODEL_NAME}",
+        f"AI-Driven Compliance Auditor  ·  Report {report_id}  ·  "
+        f"{datetime.now().strftime('%Y-%m-%d')}  ·  Model: {MODEL_NAME.split('/')[-1]}",
         sty_footer,
     ))
 
