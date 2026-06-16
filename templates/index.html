@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PDF Violation Agent</title>
+<style>
+  :root {
+    --bg: #0d0d1a;
+    --surface: #141428;
+    --surface2: #1c1c38;
+    --border: #2a2a50;
+    --accent: #6c63ff;
+    --accent2: #ff6584;
+    --success: #00d68f;
+    --warn: #ffaa00;
+    --danger: #ff3d71;
+    --text: #e8e8ff;
+    --muted: #8888bb;
+    --radius: 12px;
+    --font: 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: linear-gradient(135deg, #1a1a3e 0%, #0d0d1a 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .logo { font-size: 28px; }
+  .header-text h1 {
+    font-size: 20px;
+    font-weight: 700;
+    background: linear-gradient(90deg, #6c63ff, #ff6584);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header-text p { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .status-badge {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .status-badge:hover { border-color: var(--accent); }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  .dot.offline { background: var(--danger); }
+
+  /* ── LAYOUT ── */
+  .main {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 0;
+    flex: 1;
+    height: calc(100vh - 65px);
+  }
+
+  /* ── LEFT PANEL ── */
+  .left-panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .panel-section {
+    border-bottom: 1px solid var(--border);
+    padding: 20px;
+  }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title .icon { font-size: 14px; }
+
+  /* Drop zones */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 24px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s;
+    background: var(--surface2);
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.dragging {
+    border-color: var(--accent);
+    background: rgba(108, 99, 255, 0.08);
+  }
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .drop-icon { font-size: 32px; margin-bottom: 8px; }
+  .drop-label { font-size: 13px; color: var(--text); font-weight: 500; }
+  .drop-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  .file-chosen {
+    display: none;
+    background: rgba(0, 214, 143, 0.1);
+    border: 1px solid var(--success);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--success);
+    margin-top: 10px;
+    word-break: break-all;
+  }
+  .file-chosen.show { display: flex; align-items: center; gap: 8px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    width: 100%;
+    margin-top: 10px;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    color: white;
+  }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent); }
+  .btn-danger {
+    background: rgba(255, 61, 113, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(255,61,113,0.3);
+  }
+  .btn-danger:hover { background: rgba(255,61,113,0.25); }
+  .btn-success {
+    background: linear-gradient(135deg, #00d68f, #00b377);
+    color: #0d0d1a;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 14px;
+    margin-top: 0;
+  }
+  .btn-success:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-success:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  /* Context input */
+  .input-field {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 12px;
+    padding: 10px 12px;
+    resize: vertical;
+    min-height: 60px;
+    font-family: var(--font);
+    transition: border 0.2s;
+  }
+  .input-field:focus { outline: none; border-color: var(--accent); }
+  .input-label {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    display: block;
+  }
+
+  /* Doc list */
+  .doc-list { display: flex; flex-direction: column; gap: 6px; }
+  .doc-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  .doc-item .doc-icon { font-size: 16px; }
+  .doc-name { flex: 1; color: var(--text); word-break: break-all; }
+  .doc-badge {
+    font-size: 10px;
+    background: rgba(108,99,255,0.2);
+    color: var(--accent);
+    border-radius: 10px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+  .empty-state {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 16px;
+  }
+
+  /* Stats row */
+  .stats-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .stat-chip {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    text-align: center;
+  }
+  .stat-num { font-size: 18px; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+  /* ── RIGHT PANEL ── */
+  .right-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Analyze button bar */
+  .analyze-bar {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .analyze-bar .btn-success { width: auto; flex: 1; max-width: 280px; margin-top: 0; }
+
+  /* Progress */
+  .progress-container {
+    display: none;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    color: var(--muted);
+  }
+  .progress-container.show { display: flex; }
+  .spinner {
+    width: 48px; height: 48px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress-steps { display: flex; flex-direction: column; gap: 8px; }
+  .step {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; opacity: 0.4; transition: opacity 0.3s;
+  }
+  .step.active { opacity: 1; color: var(--accent); }
+  .step.done { opacity: 0.7; color: var(--success); }
+  .step-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: currentColor; flex-shrink: 0;
+  }
+
+  /* Results area */
+  .results-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .welcome-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .welcome-state .big-icon { font-size: 64px; opacity: 0.3; }
+  .welcome-state h2 { font-size: 18px; color: var(--text); font-weight: 500; }
+  .welcome-state p { font-size: 13px; max-width: 360px; }
+
+  /* Result card */
+  .result-meta {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .meta-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    text-align: center;
+  }
+  .meta-card .num { font-size: 24px; font-weight: 700; }
+  .meta-card .lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .meta-card.accent { border-color: var(--accent); background: rgba(108,99,255,0.08); }
+  .meta-card.accent .num { color: var(--accent); }
+  .meta-card.success { border-color: var(--success); background: rgba(0,214,143,0.08); }
+  .meta-card.success .num { color: var(--success); }
+  .meta-card.warn { border-color: var(--warn); background: rgba(255,170,0,0.08); }
+  .meta-card.warn .num { color: var(--warn); }
+
+  /* Download bar */
+  .download-bar {
+    background: var(--surface);
+    border: 1px solid var(--success);
+    border-radius: var(--radius);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .download-bar .dl-info { flex: 1; }
+  .download-bar .dl-title { font-size: 14px; font-weight: 600; color: var(--success); }
+  .download-bar .dl-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .btn-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: var(--success);
+    color: #0d0d1a;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 13px;
+    text-decoration: none;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+  }
+  .btn-download:hover { opacity: 0.85; }
+
+  /* Analysis markdown output */
+  .analysis-output {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .analysis-header {
+    padding: 12px 16px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .analysis-body {
+    padding: 20px;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 500px;
+    overflow-y: auto;
+    font-family: 'Segoe UI', sans-serif;
+    color: var(--text);
+  }
+
+  /* Markdown rendering inside analysis-body */
+  .md-h1 { font-size: 16px; font-weight: 700; color: var(--accent); margin: 16px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .md-h2 { font-size: 14px; font-weight: 600; color: #a0a0ff; margin: 14px 0 6px; }
+  .md-h3 { font-size: 13px; font-weight: 600; color: var(--text); margin: 12px 0 4px; }
+  .md-p { margin: 4px 0 8px; }
+  .md-li { margin: 3px 0 3px 20px; }
+  .md-table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 12px; }
+  .md-table th { background: rgba(108,99,255,0.2); color: var(--accent); padding: 7px 10px; text-align: left; border: 1px solid var(--border); }
+  .md-table td { padding: 6px 10px; border: 1px solid var(--border); }
+  .md-table tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  .sev-critical { color: var(--danger); font-weight: 700; }
+  .sev-high { color: var(--accent2); font-weight: 600; }
+  .sev-medium { color: var(--warn); font-weight: 600; }
+  .sev-low { color: var(--success); }
+  .md-bold { font-weight: 700; color: var(--text); }
+  .md-code { font-family: 'Courier New', monospace; background: var(--surface2); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    padding: 12px 20px; border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    transform: translateY(80px); opacity: 0;
+    transition: all 0.3s; z-index: 1000;
+    max-width: 360px; pointer-events: none;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { background: rgba(0,214,143,0.15); border: 1px solid var(--success); color: var(--success); }
+  #toast.error { background: rgba(255,61,113,0.15); border: 1px solid var(--danger); color: var(--danger); }
+  #toast.info { background: rgba(108,99,255,0.15); border: 1px solid var(--accent); color: var(--accent); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🔍</div>
+  <div class="header-text">
+    <h1>PDF Violation Agent</h1>
+    <p>AI-powered document compliance checker using Qwen3 + ChromaDB</p>
+  </div>
+  <div class="status-badge" onclick="checkHealth()" title="Click to check status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Checking...</span>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- ── LEFT PANEL ── -->
+  <div class="left-panel">
+
+    <!-- Vector DB Stats -->
+    <div class="panel-section">
+      <div class="section-title"><span class="icon">🗄️</span> Vector Database</div>
+      <div class="stats-row">
+        <div class="stat-chip">
+          <div class="stat-num" id="dbDocs">0</div>
+          <div class="stat-label">Documents</div>
+        </div>
+        <div class="stat-chip">
+          <div class="stat-num" id="dbChunks">0</div>
+          <div class="stat-label">Chunks</div>
+        </div>
+      </div>
+      <div class="doc-list" id="docList">
+        <div class="empty-state">No reference documents indexed yet</div>
+      </div>
+    </div>
+
+    <!-- Index Reference PDF -->
+    <div class="panel-section">
+      <div class="section-title"><span class="icon">📚</span> Index Reference PDF</div>
+      <div class="drop-zone" id="refDropZone"
+           ondragover="handleDrag(event,'refDropZone')"
+           ondragleave="handleDragLeave('refDropZone')"
+           ondrop="handleRefDrop(event)">
+        <input type="file" accept=".pdf" id="refFileInput" onchange="handleRefFile(event)"/>
+        <div class="drop-icon">📄</div>
+        <div class="drop-label">Drop Reference PDF here</div>
+        <div class="drop-sub">or click to browse</div>
+      </div>
+      <div class="file-chosen" id="refFileChosen">
+        <span>📎</span><span id="refFileName"></span>
+      </div>
+      <button class="btn btn-secondary" onclick="indexReference()" id="indexBtn">
+        ⬆️ Index to Vector DB
+      </button>
+      <button class="btn btn-danger" onclick="clearDB()" style="margin-top:6px;">
+        🗑️ Clear Vector DB
+      </button>
+    </div>
+
+    <!-- Upload Doc to Analyze -->
+    <div class="panel-section">
+      <div class="section-title"><span class="icon">🔎</span> Document to Analyze</div>
+      <div class="drop-zone" id="uploadDropZone"
+           ondragover="handleDrag(event,'uploadDropZone')"
+           ondragleave="handleDragLeave('uploadDropZone')"
+           ondrop="handleUploadDrop(event)">
+        <input type="file" accept=".pdf" id="uploadFileInput" onchange="handleUploadFile(event)"/>
+        <div class="drop-icon">📋</div>
+        <div class="drop-label">Drop PDF to Analyze</div>
+        <div class="drop-sub">Will be compared against reference DB</div>
+      </div>
+      <div class="file-chosen" id="uploadFileChosen">
+        <span>📎</span><span id="uploadFileName"></span>
+      </div>
+      <label class="input-label" style="margin-top:10px;">Context hint (optional)</label>
+      <textarea class="input-field" id="contextHint"
+        placeholder="e.g. 'compliance check', 'contract terms', 'safety regulations'..."></textarea>
+    </div>
+
+  </div>
+
+  <!-- ── RIGHT PANEL ── -->
+  <div class="right-panel">
+
+    <!-- Analyze button bar -->
+    <div class="analyze-bar">
+      <button class="btn btn-success" onclick="runAnalysis()" id="analyzeBtn" disabled>
+        🚀 Run Violation Analysis
+      </button>
+      <div style="font-size:12px;color:var(--muted);flex:1;">
+        Upload a PDF to analyze and ensure reference docs are indexed
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-container" id="progressContainer">
+      <div class="spinner"></div>
+      <div class="progress-steps" id="progressSteps">
+        <div class="step active" id="step1"><div class="step-dot"></div>Extracting PDF text...</div>
+        <div class="step" id="step2"><div class="step-dot"></div>Searching vector database...</div>
+        <div class="step" id="step3"><div class="step-dot"></div>Qwen3 analyzing violations...</div>
+        <div class="step" id="step4"><div class="step-dot"></div>Generating PDF report...</div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="results-area" id="resultsArea">
+      <div class="welcome-state" id="welcomeState">
+        <div class="big-icon">📊</div>
+        <h2>Ready to Analyze</h2>
+        <p>Index one or more reference PDFs into the vector database, then upload a document to check for violations.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────────
+let refFile = null;
+let uploadFile = null;
+
+// ── INIT ───────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  checkHealth();
+  loadIndexedDocs();
+});
+
+// ── HEALTH CHECK ───────────────────────────────────────────────────────────────
+async function checkHealth() {
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  dot.className = 'dot';
+  text.textContent = 'Checking...';
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    if (data.vllm === 'online') {
+      dot.className = 'dot online';
+      const hasQwen = data.model_ready;
+      text.textContent = hasQwen ? `vLLM + Qwen3 ✓` : 'vLLM online — model loading';
+      if (!hasQwen) showToast('Run: vllm pull qwen3', 'info');
+    } else {
+      dot.className = 'dot offline';
+      text.textContent = 'vLLM offline';
+      showToast('Start vLLM server (see README)', 'error');
+    }
+  } catch {
+    dot.className = 'dot offline';
+    text.textContent = 'Cannot connect';
+  }
+}
+
+// ── DRAG & DROP ────────────────────────────────────────────────────────────────
+function handleDrag(e, id) { e.preventDefault(); document.getElementById(id).classList.add('dragging'); }
+function handleDragLeave(id) { document.getElementById(id).classList.remove('dragging'); }
+
+function handleRefDrop(e) {
+  e.preventDefault();
+  document.getElementById('refDropZone').classList.remove('dragging');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.pdf')) setRefFile(f);
+  else showToast('Only PDF files allowed', 'error');
+}
+function handleUploadDrop(e) {
+  e.preventDefault();
+  document.getElementById('uploadDropZone').classList.remove('dragging');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.pdf')) setUploadFile(f);
+  else showToast('Only PDF files allowed', 'error');
+}
+function handleRefFile(e) { if (e.target.files[0]) setRefFile(e.target.files[0]); }
+function handleUploadFile(e) { if (e.target.files[0]) setUploadFile(e.target.files[0]); }
+
+function setRefFile(f) {
+  refFile = f;
+  document.getElementById('refFileName').textContent = f.name;
+  document.getElementById('refFileChosen').classList.add('show');
+}
+function setUploadFile(f) {
+  uploadFile = f;
+  document.getElementById('uploadFileName').textContent = f.name;
+  document.getElementById('uploadFileChosen').classList.add('show');
+  document.getElementById('analyzeBtn').disabled = false;
+  showToast(`Selected: ${f.name}`, 'success');
+}
+
+// ── INDEX REFERENCE ────────────────────────────────────────────────────────────
+async function indexReference() {
+  if (!refFile) { showToast('Select a reference PDF first', 'error'); return; }
+  const btn = document.getElementById('indexBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Indexing...';
+  try {
+    const fd = new FormData();
+    fd.append('file', refFile);
+    const res = await fetch('/api/index-reference', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.success) {
+      showToast(data.message, 'success');
+      await loadIndexedDocs();
+      refFile = null;
+      document.getElementById('refFileChosen').classList.remove('show');
+      document.getElementById('refFileInput').value = '';
+    } else {
+      showToast(data.detail || 'Indexing failed', 'error');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '⬆️ Index to Vector DB';
+}
+
+// ── LOAD INDEXED DOCS ──────────────────────────────────────────────────────────
+async function loadIndexedDocs() {
+  try {
+    const res = await fetch('/api/indexed-docs');
+    const data = await res.json();
+    document.getElementById('dbDocs').textContent = data.count;
+    document.getElementById('dbChunks').textContent = data.total_chunks;
+    const list = document.getElementById('docList');
+    if (data.documents.length === 0) {
+      list.innerHTML = '<div class="empty-state">No reference documents indexed yet</div>';
+    } else {
+      list.innerHTML = data.documents.map(d => `
+        <div class="doc-item">
+          <span class="doc-icon">📄</span>
+          <span class="doc-name">${d}</span>
+          <span class="doc-badge">indexed</span>
+        </div>
+      `).join('');
+    }
+  } catch {}
+}
+
+// ── CLEAR DB ───────────────────────────────────────────────────────────────────
+async function clearDB() {
+  if (!confirm('Clear all documents from vector DB?')) return;
+  try {
+    const res = await fetch('/api/clear-db', { method: 'DELETE' });
+    const data = await res.json();
+    showToast(data.message, 'info');
+    await loadIndexedDocs();
+  } catch (e) {
+    showToast('Error clearing DB', 'error');
+  }
+}
+
+// ── RUN ANALYSIS ───────────────────────────────────────────────────────────────
+async function runAnalysis() {
+  if (!uploadFile) { showToast('Please select a PDF to analyze', 'error'); return; }
+
+  // Show progress
+  document.getElementById('welcomeState') && (document.getElementById('welcomeState').style.display = 'none');
+  document.getElementById('resultsArea').innerHTML = '';
+  const progress = document.getElementById('progressContainer');
+  progress.classList.add('show');
+
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Analyzing...';
+
+  // Animate steps
+  const steps = ['step1','step2','step3','step4'];
+  const delays = [0, 3000, 8000, 25000];
+  steps.forEach((id, i) => {
+    setTimeout(() => {
+      steps.forEach(s => document.getElementById(s).className = 'step done');
+      document.getElementById(id).className = 'step active';
+    }, delays[i]);
+  });
+
+  try {
+    const fd = new FormData();
+    fd.append('file', uploadFile);
+    fd.append('context_hint', document.getElementById('contextHint').value);
+    const res = await fetch('/api/analyze', { method: 'POST', body: fd });
+    const data = await res.json();
+
+    progress.classList.remove('show');
+    btn.disabled = false;
+    btn.textContent = '🚀 Run Violation Analysis';
+
+    if (data.success) {
+      renderResults(data);
+      showToast('Analysis complete! Report ready.', 'success');
+    } else {
+      showError(data.detail || 'Analysis failed');
+    }
+  } catch (e) {
+    progress.classList.remove('show');
+    btn.disabled = false;
+    btn.textContent = '🚀 Run Violation Analysis';
+    showError(e.message);
+  }
+}
+
+// ── RENDER RESULTS ─────────────────────────────────────────────────────────────
+function renderResults(data) {
+  const area = document.getElementById('resultsArea');
+
+  // Count violations from text
+  const text = data.analysis_markdown || '';
+  const critCount = (text.match(/\bCritical\b/gi) || []).length;
+  const highCount = (text.match(/\bHigh\b/gi) || []).length;
+  const violations = (text.match(/V-\d{3}/g) || []).length;
+
+  area.innerHTML = `
+    <div class="result-meta">
+      <div class="meta-card accent">
+        <div class="num">${violations}</div>
+        <div class="lbl">Violations Found</div>
+      </div>
+      <div class="meta-card warn">
+        <div class="num">${data.pages_analyzed}</div>
+        <div class="lbl">Pages Analyzed</div>
+      </div>
+      <div class="meta-card success">
+        <div class="num">${data.chunks_retrieved}</div>
+        <div class="lbl">Ref. Chunks Used</div>
+      </div>
+    </div>
+
+    <div class="download-bar">
+      <div class="dl-info">
+        <div class="dl-title">✅ PDF Report Generated</div>
+        <div class="dl-sub">Report ID: ${data.report_id} • ${data.reference_docs.join(', ')}</div>
+      </div>
+      <a href="${data.download_url}" download class="btn-download">
+        ⬇️ Download Report PDF
+      </a>
+    </div>
+
+    <div class="analysis-output">
+      <div class="analysis-header">
+        <span>📋 AI Analysis Output</span>
+        <span style="color:var(--success);font-weight:400;">Qwen3 via vLLM</span>
+      </div>
+      <div class="analysis-body" id="mdOutput"></div>
+    </div>
+  `;
+
+  // Render markdown
+  document.getElementById('mdOutput').innerHTML = renderMarkdown(text);
+}
+
+function showError(msg) {
+  document.getElementById('resultsArea').innerHTML = `
+    <div class="welcome-state">
+      <div class="big-icon">❌</div>
+      <h2>Analysis Failed</h2>
+      <p style="color:var(--danger);">${msg}</p>
+    </div>
+  `;
+}
+
+// ── SIMPLE MARKDOWN RENDERER ───────────────────────────────────────────────────
+function renderMarkdown(text) {
+  const lines = text.split('\n');
+  let html = '';
+  let inTable = false;
+  let tableRows = [];
+
+  function flushTable() {
+    if (tableRows.length === 0) return;
+    html += '<table class="md-table"><thead>';
+    html += '<tr>' + tableRows[0].map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+    for (let i = 1; i < tableRows.length; i++) {
+      html += '<tr>' + tableRows[i].map(c => `<td>${colorSeverity(c)}</td>`).join('') + '</tr>';
+    }
+    html += '</tbody></table>';
+    tableRows = [];
+    inTable = false;
+  }
+
+  function colorSeverity(t) {
+    return t
+      .replace(/\bCritical\b/gi, '<span class="sev-critical">Critical</span>')
+      .replace(/\bHigh\b/gi, '<span class="sev-high">High</span>')
+      .replace(/\bMedium\b/gi, '<span class="sev-medium">Medium</span>')
+      .replace(/\bLow\b/gi, '<span class="sev-low">Low</span>');
+  }
+
+  function inlineFormat(t) {
+    t = t.replace(/\*\*(.+?)\*\*/g, '<span class="md-bold">$1</span>');
+    t = t.replace(/`(.+?)`/g, '<span class="md-code">$1</span>');
+    t = colorSeverity(t);
+    return t;
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim().startsWith('|') && line.includes('|')) {
+      if (i+1 < lines.length && lines[i+1].includes('---')) {
+        inTable = true;
+        tableRows.push(line.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim()));
+        i++; // skip separator
+        continue;
+      } else if (inTable) {
+        tableRows.push(line.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim()));
+        continue;
+      }
+    } else if (inTable) {
+      flushTable();
+    }
+
+    const l = line.trim();
+    if (!l) { html += '<div style="height:6px"></div>'; continue; }
+    if (l.startsWith('### ')) { html += `<div class="md-h3">${inlineFormat(l.slice(4))}</div>`; continue; }
+    if (l.startsWith('## '))  { html += `<div class="md-h2">${inlineFormat(l.slice(3))}</div>`; continue; }
+    if (l.startsWith('# '))   { html += `<div class="md-h1">${inlineFormat(l.slice(2))}</div>`; continue; }
+    if (l.startsWith('---'))  { html += '<hr style="border:none;border-top:1px solid var(--border);margin:8px 0"/>'; continue; }
+    if (l.startsWith('- ') || l.startsWith('* ')) {
+      html += `<div class="md-li">• ${inlineFormat(l.slice(2))}</div>`; continue;
+    }
+    html += `<div class="md-p">${inlineFormat(l)}</div>`;
+  }
+  if (inTable) flushTable();
+  return html;
+}
+
+// ── TOAST ──────────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `show ${type}`;
+  setTimeout(() => t.className = '', 3500);
+}
+</script>
+</body>
+</html>
